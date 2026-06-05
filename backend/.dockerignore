@@ -1,0 +1,13 @@
+# Не тащим в build-контекст лишнее (ускоряет сборку, уменьшает образ)
+.venv/
+venv/
+__pycache__/
+*.pyc
+data/
+storage/
+*.glb
+*.obj
+*.pth
+*.ckpt
+.env
+.git

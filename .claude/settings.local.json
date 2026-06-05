@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//private/tmp/**)",
+      "Bash(python3 -m venv tryon_venv)",
+      "Bash(/tmp/tryon_venv/bin/pip -q install --upgrade pip)",
+      "Bash(/tmp/tryon_venv/bin/pip -q install \"pydantic-settings\" \"Pillow\" \"numpy\" \"trimesh\" \"httpx\")",
+      "Bash(/tmp/tryon_venv/bin/pip list *)",
+      "Bash(MOCK_PIPELINE=true LOCAL_STORAGE_DIR=/tmp/tryon_storage BODY_MESH_PATH=/tmp/tryon_body.obj /tmp/tryon_venv/bin/python backend/scripts/smoke_pipeline.py)",
+      "Bash(/tmp/tryon_venv/bin/pip -q install fastapi \"uvicorn[standard]\" sqlalchemy celery redis python-multipart beautifulsoup4 \"psycopg[binary]\" boto3)"
+    ]
+  }
+}

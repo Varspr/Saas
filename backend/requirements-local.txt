@@ -1,0 +1,19 @@
+# Лёгкий набор для локального запуска БЕЗ Docker
+# (mock + eager: API и пайплайн в одном процессе, без Redis/Postgres).
+# Версии не зафиксированы — ставится в т.ч. на свежий Python 3.12-3.14.
+#
+# Это НЕ для прода. Прод/полный стек — через Docker (requirements.txt).
+
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
+pydantic-settings
+celery
+redis
+SQLAlchemy
+httpx
+beautifulsoup4
+Pillow
+numpy
+trimesh

@@ -1,0 +1,99 @@
+# docker-compose для MVP (Фаза 0).
+#
+# Сервисы:
+#   api     — FastAPI (CPU)
+#   worker  — Celery worker. В mock-режиме CPU; для real-режима собирается
+#             как GPU-образ (Dockerfile.worker) и запускается на машине с A100.
+#   redis   — брокер очереди
+#   db      — PostgreSQL
+#   frontend— Next.js + Three.js
+#
+# Примечание про GPU: docker compose локально обычно без GPU. Для боевого
+# воркера используйте `docker compose -f docker-compose.gpu.yml` на RunPod/
+# Lambda с `deploy.resources.reservations.devices` (nvidia). Здесь —
+# универсальный CPU/mock вариант для разработки.
+
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.api
+    env_file: .env
+    environment:
+      # внутри сети compose хосты — имена сервисов
+      DATABASE_URL: postgresql+psycopg://tryon:tryon@db:5432/tryon
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+      # Реальная физика ткани на CPU (Blender). Раскомментируйте обе строки ниже
+      # И DRAPE_BACKEND: blender в environment. Сборка станет дольше/больше.
+      # args:
+      #   INSTALL_BLENDER: "true"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://tryon:tryon@db:5432/tryon
+      REDIS_URL: redis://redis:6379/0
+      # DRAPE_BACKEND: blender   # ← включить cloth simulation (нужен INSTALL_BLENDER выше)
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    # Для real-режима на GPU-хосте раскомментировать:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tryon
+      POSTGRES_PASSWORD: tryon
+      POSTGRES_DB: tryon
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tryon"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # на удалённой машине задайте PUBLIC_API_BASE_URL=http://<IP>:8000 в .env
+        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  storage:

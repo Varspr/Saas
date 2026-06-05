@@ -1,0 +1,2 @@
+# Папка для статики Next.js (favicon, картинки и т.п.).
+# Нужна, чтобы COPY --from=builder /app/public в Dockerfile не падал.

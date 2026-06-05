@@ -1,0 +1,72 @@
+# ── Воркер. Два сценария сборки. ──
+#
+# (1) DEV / MOCK (этот файл по умолчанию): CPU, лёгкий. Гоняет весь пайплайн
+#     на заглушках (Pillow + trimesh). Подходит для docker-compose локально.
+#
+# (2) PROD / REAL (GPU): берётся базовый образ nvidia/cuda, доустанавливаются
+#     requirements-gpu.txt, Blender и InstantMesh. См. блок в самом низу и
+#     MODELS.md. Этот образ ~15 GB и запускается на A100 (RunPod/Modal).
+
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libpq-dev \
+    # для Playwright (скрейпинг магазинов, Фаза 1):
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+    libgbm1 libasound2 libpango-1.0-0 libcairo2 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+# Браузер для Playwright
+RUN playwright install chromium
+
+# (опционально) Blender для НАСТОЯЩЕЙ физики ткани на CPU (GPU не нужен).
+# Включить:  docker build --build-arg INSTALL_BLENDER=true ...
+#            и выставить DRAPE_BACKEND=blender в окружении.
+ARG INSTALL_BLENDER=false
+ARG BLENDER_VERSION=4.2.3
+# MakeHuman/MPFB2 для реалистичного манекена (BODY_ENGINE=mpfb). Меши CC0.
+# Релизы/URL: https://github.com/makehumancommunity/mpfb2/releases
+ARG MPFB_URL=https://github.com/makehumancommunity/mpfb2/releases/download/v2.0.6/mpfb-2.0.6.zip
+RUN if [ "$INSTALL_BLENDER" = "true" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends \
+        wget xz-utils unzip libgl1 libxi6 libxxf86vm1 libxfixes3 libxrender1 libsm6 && \
+      wget -q "https://download.blender.org/release/Blender4.2/blender-${BLENDER_VERSION}-linux-x64.tar.xz" -O /tmp/b.tar.xz && \
+      mkdir -p /opt/blender && tar -xf /tmp/b.tar.xz -C /opt/blender --strip-components=1 && \
+      rm /tmp/b.tar.xz && \
+      ADDONS="$(ls -d /opt/blender/*/scripts/addons 2>/dev/null | head -1)" && \
+      wget -q "$MPFB_URL" -O /tmp/mpfb.zip && unzip -q /tmp/mpfb.zip -d "$ADDONS" && rm /tmp/mpfb.zip && \
+      rm -rf /var/lib/apt/lists/*; \
+    fi
+ENV BLENDER_BIN=/opt/blender/blender
+
+COPY app ./app
+
+# Celery worker. concurrency=1, т.к. GPU-задачи тяжёлые и не параллелятся
+# на одной карте. В mock-режиме можно поднять.
+CMD ["celery", "-A", "app.worker.celery_app.celery_app", "worker", \
+     "--loglevel=info", "--concurrency=1"]
+
+# ─────────────────────────────────────────────────────────────────────────
+# REAL/GPU вариант (ориентир, не активен в этом файле):
+#
+#   FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+#   RUN apt-get update && apt-get install -y python3.11 python3-pip \
+#       blender wget git libgl1 libglib2.0-0
+#   COPY requirements-gpu.txt .
+#   RUN pip install -r requirements-gpu.txt
+#   # InstantMesh
+#   RUN git clone https://github.com/TencentARC/InstantMesh /opt/InstantMesh \
+#       && pip install -r /opt/InstantMesh/requirements.txt
+#   # Веса моделей кладутся через volume или докачиваются на старте (MODELS.md)
+#   COPY app ./app
+#   CMD ["celery", "-A", "app.worker.celery_app.celery_app", "worker", \
+#        "--loglevel=info", "--concurrency=1"]
+# ─────────────────────────────────────────────────────────────────────────

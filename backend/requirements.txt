@@ -1,0 +1,36 @@
+# ── Лёгкие зависимости: API + воркер в mock-режиме (без GPU) ──
+# Реальные ML-зависимости (torch, segment-anything, InstantMesh) — в
+# requirements-gpu.txt, чтобы dev-установка оставалась лёгкой.
+
+# Web / API (Фаза 0)
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20         # приём файлов в POST /api/jobs
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# Очередь задач (Фаза 0)
+celery==5.4.0
+redis==5.2.1
+
+# БД (Фаза 0)
+SQLAlchemy==2.0.36
+psycopg[binary]==3.2.3
+
+# Хранилище S3/R2 (Фаза 0/4)
+boto3==1.35.92
+
+# HTTP-клиент для скачивания картинок по прямой ссылке (Фаза 1)
+httpx==0.28.1
+
+# Скрейпинг страниц магазинов (Фаза 1)
+# Внимание: после установки нужен `playwright install chromium`.
+playwright==1.49.1
+beautifulsoup4==4.12.3
+
+# Обработка изображений (Фаза 1, mock-сегментация)
+Pillow==11.0.0
+numpy==2.2.1
+
+# 3D: чтение/запись OBJ/GLB без Blender (mock-реконструкция и сборка GLB)
+trimesh==4.5.3

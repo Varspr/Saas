@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Env / secrets
+.env
+*.local
+
+# Data / storage / models
+/data/
+backend/data/
+models/
+*.pth
+*.ckpt
+*.safetensors
+
+# Pipeline artifacts
+*.glb
+*.obj.tmp
+backend/storage/
+.localdata/
+
+# Node / Next
+node_modules/
+.next/
+out/
+npm-debug.log*
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,45 @@
+# Override для real-режима на GPU-хосте.
+#
+# Использовать вместе с базовым compose:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+#
+# Требования хоста: NVIDIA-драйверы + nvidia-container-toolkit.
+# Заменяет сборку воркера на GPU-Dockerfile, включает real-пайплайн,
+# монтирует volume с весами и резервирует GPU.
+
+services:
+  worker:
+    # Сборка из исходников (локально/на поде):
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker.gpu
+    # ...или готовый образ из CI (закомментируйте build выше и раскомментируйте):
+    # image: ghcr.io/<owner>/<repo>/worker-gpu:latest
+    environment:
+      MOCK_PIPELINE: "false"
+      DATABASE_URL: postgresql+psycopg://tryon:tryon@db:5432/tryon
+      REDIS_URL: redis://redis:6379/0
+      MODELS_DIR: /models
+      HF_HOME: /models/hf
+      TORCH_HOME: /models/torch
+      SAM_CHECKPOINT: /models/sam_vit_h_4b8939.pth
+      SAM_MODEL_TYPE: vit_h
+      INSTANTMESH_REPO: /opt/InstantMesh
+      INSTANTMESH_CONFIG: /opt/InstantMesh/configs/instant-mesh-large.yaml
+      BLENDER_BIN: /opt/blender/blender
+      BODY_MESH_PATH: /assets/body_tpose.obj
+      # PREWARM_INSTANTMESH: "true"   # прогреть веса на старте (дольше boot)
+    volumes:
+      - models:/models               # персистентные веса между перезапусками
+      - storage:/data/storage
+      - ./assets:/assets
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  models:

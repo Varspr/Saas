@@ -1,0 +1,30 @@
+# ── Standalone-зависимости GPU-воркера (real-режим). ──
+# ВНИМАНИЕ: НЕ включает requirements.txt — там numpy 2.x / Pillow 11,
+# несовместимые с torch 2.1 + InstantMesh (им нужен numpy<2).
+#
+# torch / torchvision / xformers / segment-anything / nvdiffrast и
+# зависимости InstantMesh ставятся отдельными шагами в Dockerfile.worker.gpu
+# (нужны спец. --index-url и git).
+
+# App runtime (Фаза 0) — версии, совместимые с numpy<2
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+celery==5.4.0
+redis==5.2.1
+
+SQLAlchemy==2.0.36
+psycopg[binary]==3.2.3
+boto3==1.35.92
+
+httpx==0.28.1
+beautifulsoup4==4.12.3
+playwright==1.49.1
+
+# Совместимость с torch 2.1 / InstantMesh
+numpy==1.26.4
+Pillow==10.2.0
+trimesh==4.5.3

@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────────────────────────────────
+# All-in-one образ для RunPod: GPU-воркер + API + Redis + Postgres в одном
+# контейнере. «Одна Pod = весь сервис» — для MVP/демо. Не для прод-нагрузки
+# (для прода — отдельные сервисы, см. DEPLOY-GPU.md).
+#
+# Базируется на нашем GPU-образе (его собирает CI). Сборка этого образа —
+# быстрая (добавляет только redis/postgres поверх).
+#
+# Локальная сборка:
+#   docker build -f backend/Dockerfile.runpod \
+#     --build-arg BASE=ghcr.io/<owner>/<repo>/worker-gpu:latest \
+#     -t <registry>/worker-runpod backend
+# В CI собирается автоматически (.github/workflows/gpu-worker.yml, job runpod).
+# ─────────────────────────────────────────────────────────────────────────
+ARG BASE=ghcr.io/CHANGE_ME/worker-gpu:latest
+FROM ${BASE}
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      redis-server postgresql postgresql-contrib \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY docker/runpod_entrypoint.sh /opt/app/docker/runpod_entrypoint.sh
+RUN chmod +x /opt/app/docker/runpod_entrypoint.sh
+
+# По умолчанию всё внутри контейнера (redis/postgres на 127.0.0.1).
+# Данные и веса — на volume /data (примонтировать в RunPod).
+ENV DATABASE_URL=postgresql+psycopg://tryon:tryon@127.0.0.1:5432/tryon \
+    REDIS_URL=redis://127.0.0.1:6379/0 \
+    USE_LOCAL_STORAGE=true \
+    LOCAL_STORAGE_DIR=/data/storage \
+    MODELS_DIR=/data/models \
+    HF_HOME=/data/models/hf \
+    SAM_CHECKPOINT=/data/models/sam_vit_h_4b8939.pth \
+    PGDATA=/data/pgdata \
+    MOCK_PIPELINE=false \
+    DRAPE_BACKEND=blender \
+    BODY_ENGINE=parametric
+
+EXPOSE 8000
+ENTRYPOINT ["/opt/app/docker/runpod_entrypoint.sh"]

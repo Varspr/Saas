@@ -1,0 +1,190 @@
+# Сборка и пуш GPU-образа воркера в registry (GHCR) с buildx-кэшем.
+#
+# Зачем: образ ~15 ГБ (CUDA + torch + InstantMesh + Blender). Собирать его
+# вручную на GPU-поде при каждом деплое дорого и медленно. CI собирает один
+# раз, кэширует слои в registry и пушит готовый образ — под просто его тянет.
+#
+# Registry по умолчанию: GitHub Container Registry (ghcr.io). Логин — через
+# встроенный GITHUB_TOKEN, отдельные секреты не нужны. Чтобы пушить в Docker
+# Hub/ECR — поменяйте REGISTRY/IMAGE_NAME и шаг login (см. комментарии).
+#
+# Кэш: type=registry (тег :buildcache рядом с образом). Кэш GitHub Actions
+# (type=gha) лимитирован 10 ГБ — для такого образа мал, поэтому registry-кэш.
+
+name: gpu-worker
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "backend/**"
+      - ".github/workflows/gpu-worker.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/gpu-worker.yml"
+  workflow_dispatch: {}   # ручной запуск (в т.ч. для релизных сборок)
+
+# Не копим параллельные сборки одной ветки
+concurrency:
+  group: gpu-worker-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  # Итог: ghcr.io/<owner>/<repo>/worker-gpu (приводится к нижнему регистру ниже)
+  IMAGE_NAME: ${{ github.repository }}/worker-gpu
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write       # пуш образа в GHCR
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Образ большой — освобождаем место на раннере (иначе «no space left»).
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /usr/local/share/boost /opt/hostedtoolcache/CodeQL || true
+          sudo docker image prune -af || true
+          df -h
+
+      # Имя образа в нижнем регистре (GHCR требует lowercase)
+      - name: Compute image ref
+        run: echo "IMAGE=${REGISTRY,,}/${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # На PR не логинимся/не пушим — только проверяем, что образ собирается.
+      - name: Log in to registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          # Docker Hub: registry убрать, username/password → secrets.DOCKERHUB_*
+          # ECR: использовать aws-actions/amazon-ecr-login вместо этого шага.
+
+      - name: Docker metadata (tags/labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile.worker.gpu
+          platforms: linux/amd64       # CUDA/GPU — только amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Кэш слоёв в registry (читаем всегда, пишем только при пуше)
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}:buildcache,mode=max', env.IMAGE) || '' }}
+          provenance: false            # обычный image-манифест (не OCI-список)
+          # build-args:
+          #   BLENDER_VERSION: 4.2.3
+
+      - name: Job summary
+        if: github.event_name != 'pull_request'
+        run: |
+          {
+            echo "### GPU worker образ собран и запушен"
+            echo ""
+            echo "**Образ:** \`${{ env.IMAGE }}\`"
+            echo ""
+            echo "**Теги:**"
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo "**Digest:** \`${{ steps.build.outputs.digest }}\`"
+            echo ""
+            echo "Запуск на поде:"
+            echo '```bash'
+            echo "docker run --gpus all --env-file .env -e MOCK_PIPELINE=false \\"
+            echo "  -v tryon_models:/models ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # All-in-one образ для RunPod (api+worker+redis+postgres). Собирается поверх
+  # worker-gpu:latest, поэтому идёт после job build (на push в main / dispatch).
+  runpod:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /usr/local/share/boost /opt/hostedtoolcache/CodeQL || true
+
+      - name: Compute refs
+        run: |
+          base="${REGISTRY}/${GITHUB_REPOSITORY}/worker-gpu:latest"
+          img="${REGISTRY}/${GITHUB_REPOSITORY}/worker-runpod"
+          echo "BASE=${base,,}" >> "$GITHUB_ENV"
+          echo "RUNPOD_IMAGE=${img,,}" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.RUNPOD_IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+
+      - name: Build and push (all-in-one)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile.runpod
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            BASE=${{ env.BASE }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.RUNPOD_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.RUNPOD_IMAGE }}:buildcache,mode=max
+          provenance: false
+
+      - name: Job summary
+        run: |
+          {
+            echo "### RunPod all-in-one образ готов"
+            echo "**Образ для RunPod:** \`${{ env.RUNPOD_IMAGE }}:latest\`"
+            echo "Инструкция: RUNPOD.md"
+          } >> "$GITHUB_STEP_SUMMARY"

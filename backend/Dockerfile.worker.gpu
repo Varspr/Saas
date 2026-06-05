@@ -1,0 +1,117 @@
+# ─────────────────────────────────────────────────────────────────────────
+# GPU-воркер (real-режим): CUDA + PyTorch + SAM + InstantMesh + Blender.
+#
+# Собирает образ для запуска всего пайплайна на GPU (A100/4090/...).
+# Веса моделей НЕ зашиты в образ (иначе ~25 ГБ) — качаются на старте
+# контейнера в volume /models (entrypoint.sh → download_models.sh).
+# При желании можно «запечь» их в образ (см. DEPLOY-GPU.md).
+#
+# Сборка:
+#   docker build -f backend/Dockerfile.worker.gpu -t tryon-worker:gpu backend
+# Запуск (нужен nvidia-container-toolkit на хосте):
+#   docker run --gpus all --env-file .env -e MOCK_PIPELINE=false \
+#     -v tryon_models:/models tryon-worker:gpu
+#
+# Базовый образ — devel (а не runtime): нужен CUDA toolkit для JIT-сборки
+# CUDA-ядер nvdiffrast (InstantMesh --export_texmap).
+# ─────────────────────────────────────────────────────────────────────────
+FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    # Веса/кэши на персистентном volume (см. docker-compose.gpu.yml)
+    MODELS_DIR=/models \
+    HF_HOME=/models/hf \
+    TORCH_HOME=/models/torch \
+    BLENDER_BIN=/opt/blender/blender \
+    PYTHONPATH=/opt/app \
+    PATH=/opt/blender:$PATH
+
+# ── 1. Системные пакеты ──
+# python3.10 (дефолт Ubuntu 22.04, совместим с torch 2.1), сборочные тулзы,
+# GL/X libs для Blender headless и Playwright/Chromium.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3.10 python3.10-dev python3-pip \
+      git wget curl xz-utils ca-certificates ninja-build build-essential \
+      libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libgomp1 \
+      libx11-6 libxi6 libxxf86vm1 libxfixes3 libxkbcommon0 libxrandr2 \
+      libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+      libxcomposite1 libxdamage1 libgbm1 libasound2 libpango-1.0-0 libcairo2 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.10 /usr/bin/python \
+    && python -m pip install --upgrade pip setuptools wheel
+
+# ── 2. Blender (headless) ──
+ARG BLENDER_VERSION=4.2.3
+RUN wget -q "https://download.blender.org/release/Blender4.2/blender-${BLENDER_VERSION}-linux-x64.tar.xz" -O /tmp/blender.tar.xz \
+    && mkdir -p /opt/blender \
+    && tar -xf /tmp/blender.tar.xz -C /opt/blender --strip-components=1 \
+    && rm /tmp/blender.tar.xz \
+    && /opt/blender/blender --version
+
+# ── 2b. MakeHuman/MPFB2 — реалистичный манекен (BODY_ENGINE=mpfb). Меши CC0. ──
+# Если сборка падает на скачивании — проверьте актуальный релиз и передайте
+#   --build-arg MPFB_URL=<ссылка на mpfb-X.Y.Z.zip>
+# Список релизов: https://github.com/makehumancommunity/mpfb2/releases
+ARG INSTALL_MPFB=true
+ARG MPFB_URL=https://github.com/makehumancommunity/mpfb2/releases/download/v2.0.6/mpfb-2.0.6.zip
+RUN if [ "$INSTALL_MPFB" = "true" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/* && \
+      ADDONS="$(ls -d /opt/blender/*/scripts/addons 2>/dev/null | head -1)" && \
+      wget -q "$MPFB_URL" -O /tmp/mpfb.zip && \
+      unzip -q /tmp/mpfb.zip -d "$ADDONS" && rm /tmp/mpfb.zip && \
+      echo "MPFB установлен в $ADDONS"; \
+    fi
+
+# ── 3. PyTorch (CUDA 12.1) — версия под InstantMesh ──
+RUN pip install \
+      torch==2.1.0 torchvision==0.16.0 \
+      --index-url https://download.pytorch.org/whl/cu121
+
+# ── 4. xformers (под torch 2.1 / cu121) ──
+RUN pip install xformers==0.0.22.post7 \
+      --index-url https://download.pytorch.org/whl/cu121
+
+# ── 5. Зависимости приложения (FastAPI/Celery/trimesh/...) ──
+# requirements-gpu.txt — standalone и пинит numpy<2 / Pillow 10.x ради
+# совместимости с torch 2.1 (light requirements.txt сюда НЕ включаем).
+COPY requirements-gpu.txt /tmp/requirements-gpu.txt
+RUN pip install -r /tmp/requirements-gpu.txt \
+    && playwright install chromium
+
+# ── 6. Segment Anything (SAM, Фаза 1) ──
+RUN pip install \
+      "git+https://github.com/facebookresearch/segment-anything.git" \
+      opencv-python-headless==4.10.0.84
+
+# ── 7. InstantMesh (Фаза 2) ──
+# Клонируем репозиторий и ставим его зависимости. nvdiffrast компилирует
+# CUDA-ядра лениво при первом запуске (toolkit есть в devel-образе).
+# Веса (TencentARC/InstantMesh, sudo-ai/zero123plus) тянутся из HF в HF_HOME
+# при первом инференсе.
+RUN git clone --depth 1 https://github.com/TencentARC/InstantMesh.git /opt/InstantMesh \
+    && pip install -r /opt/InstantMesh/requirements.txt \
+    && pip install "git+https://github.com/NVlabs/nvdiffrast.git"
+# Повторно фиксируем torch на случай, если зависимости InstantMesh его сдвинули.
+RUN pip install --no-deps \
+      torch==2.1.0 torchvision==0.16.0 \
+      --index-url https://download.pytorch.org/whl/cu121
+
+# ── 8. Код приложения и скрипты ──
+WORKDIR /opt/app
+COPY app ./app
+COPY scripts ./scripts
+COPY docker/entrypoint.sh ./docker/entrypoint.sh
+RUN chmod +x ./docker/entrypoint.sh ./scripts/*.sh
+
+# Дефолты, которые ждёт пайплайн в real-режиме
+ENV MOCK_PIPELINE=false \
+    SAM_CHECKPOINT=/models/sam_vit_h_4b8939.pth \
+    SAM_MODEL_TYPE=vit_h \
+    INSTANTMESH_REPO=/opt/InstantMesh \
+    INSTANTMESH_CONFIG=/opt/InstantMesh/configs/instant-mesh-large.yaml \
+    BODY_MESH_PATH=/assets/body_tpose.obj
+
+ENTRYPOINT ["/opt/app/docker/entrypoint.sh"]
