@@ -75,6 +75,13 @@ RUN pip install \
 RUN pip install xformers==0.0.22.post7 \
       --index-url https://download.pytorch.org/whl/cu121
 
+# ── 4b. nvdiffrast (нужен InstantMesh --export_texmap) ──
+# numpy<2: torch 2.1 несовместим с numpy 2.x — иначе import torch падает, и сборка
+# nvdiffrast валится на «getting requirements to build wheel».
+# --no-build-isolation: setup nvdiffrast импортирует уже установленный torch.
+RUN pip install "numpy<2" ninja \
+    && pip install --no-build-isolation "git+https://github.com/NVlabs/nvdiffrast.git"
+
 # ── 5. Зависимости приложения (FastAPI/Celery/trimesh/...) ──
 # requirements-gpu.txt — standalone и пинит numpy<2 / Pillow 10.x ради
 # совместимости с torch 2.1 (light requirements.txt сюда НЕ включаем).
@@ -93,14 +100,13 @@ RUN pip install \
 # Веса (TencentARC/InstantMesh, sudo-ai/zero123plus) тянутся из HF в HF_HOME
 # при первом инференсе.
 RUN git clone --depth 1 https://github.com/TencentARC/InstantMesh.git /opt/InstantMesh \
-    && pip install -r /opt/InstantMesh/requirements.txt \
-    && pip install --no-build-isolation "git+https://github.com/NVlabs/nvdiffrast.git"
-# --no-build-isolation: nvdiffrast при сборке импортирует уже установленный torch;
-# в изолированной среде сборки его нет → нужен этот флаг.
-# Повторно фиксируем torch на случай, если зависимости InstantMesh его сдвинули.
+    && pip install -r /opt/InstantMesh/requirements.txt
+# Вернуть совместимые версии: InstantMesh мог подтянуть numpy 2.x / другой torch,
+# из-за чего ломается import torch (и SAM/InstantMesh/nvdiffrast в рантайме).
 RUN pip install --no-deps \
       torch==2.1.0 torchvision==0.16.0 \
-      --index-url https://download.pytorch.org/whl/cu121
+      --index-url https://download.pytorch.org/whl/cu121 \
+    && pip install "numpy<2"
 
 # ── 8. Код приложения и скрипты ──
 WORKDIR /opt/app
