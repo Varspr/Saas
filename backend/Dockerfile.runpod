@@ -16,23 +16,25 @@ ARG BASE=ghcr.io/CHANGE_ME/worker-gpu:latest
 FROM ${BASE}
 
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      redis-server postgresql postgresql-contrib \
-    && rm -rf /var/lib/apt/lists/*
+# Только Redis (брокер Celery). БД — SQLite (Postgres убран: его нельзя chown
+# на сетевом volume RunPod → контейнер падал в перезапуск).
+RUN apt-get update && apt-get install -y --no-install-recommends redis-server \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /var/tryon
 
 COPY docker/runpod_entrypoint.sh /opt/app/docker/runpod_entrypoint.sh
 RUN chmod +x /opt/app/docker/runpod_entrypoint.sh
 
-# По умолчанию всё внутри контейнера (redis/postgres на 127.0.0.1).
-# Данные и веса — на volume /data (примонтировать в RunPod).
-ENV DATABASE_URL=postgresql+psycopg://tryon:tryon@127.0.0.1:5432/tryon \
+# Redis на 127.0.0.1; БД — SQLite на контейнерном диске (/var/tryon, не на
+# сетевом volume — там бывают проблемы с блокировками SQLite).
+# Результаты (.glb, превью) и веса — на volume /data (переживают перезапуск).
+ENV DATABASE_URL=sqlite+pysqlite:////var/tryon/app.db \
     REDIS_URL=redis://127.0.0.1:6379/0 \
     USE_LOCAL_STORAGE=true \
     LOCAL_STORAGE_DIR=/data/storage \
     MODELS_DIR=/data/models \
     HF_HOME=/data/models/hf \
     SAM_CHECKPOINT=/data/models/sam_vit_h_4b8939.pth \
-    PGDATA=/data/pgdata \
     MOCK_PIPELINE=false \
     DRAPE_BACKEND=blender \
     BODY_ENGINE=parametric
