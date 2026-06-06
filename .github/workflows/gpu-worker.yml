@@ -46,13 +46,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Образ большой — освобождаем место на раннере (иначе «no space left»).
+      # Образ ~20 ГБ — чистим раннер агрессивно (иначе «no space left»).
       - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
-                      /usr/local/share/boost /opt/hostedtoolcache/CodeQL || true
+          echo "Before:"; df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /opt/ghc \
+                      /usr/local/lib/android /usr/local/share/powershell \
+                      /usr/share/swift /usr/local/share/boost \
+                      /opt/hostedtoolcache/CodeQL /usr/local/lib/node_modules || true
           sudo docker image prune -af || true
-          df -h
+          echo "After:"; df -h /
+
+      # Главное: переносим хранилище Docker на большой временный диск /mnt (~65 ГБ),
+      # иначе слои buildkit переполняют корневой раздел.
+      - name: Move Docker data-root to /mnt
+        run: |
+          sudo systemctl stop docker
+          sudo mkdir -p /mnt/docker
+          echo '{"data-root":"/mnt/docker"}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl start docker
+          docker info | grep -i "docker root dir" || true
+          df -h /mnt
 
       # Имя образа в нижнем регистре (GHCR требует lowercase)
       - name: Compute image ref
@@ -137,8 +151,19 @@ jobs:
 
       - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
-                      /usr/local/share/boost /opt/hostedtoolcache/CodeQL || true
+          sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /opt/ghc \
+                      /usr/local/lib/android /usr/local/share/powershell \
+                      /usr/share/swift /usr/local/share/boost \
+                      /opt/hostedtoolcache/CodeQL /usr/local/lib/node_modules || true
+          sudo docker image prune -af || true
+
+      - name: Move Docker data-root to /mnt
+        run: |
+          sudo systemctl stop docker
+          sudo mkdir -p /mnt/docker
+          echo '{"data-root":"/mnt/docker"}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl start docker
+          df -h /mnt
 
       - name: Compute refs
         run: |
