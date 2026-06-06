@@ -103,9 +103,12 @@ RUN pip install \
 RUN git clone --depth 1 https://github.com/TencentARC/InstantMesh.git /opt/InstantMesh \
     && sed -i '/nvdiffrast/d' /opt/InstantMesh/requirements.txt \
     && pip install -r /opt/InstantMesh/requirements.txt \
-    && pip install onnxruntime
+    && pip install onnxruntime "huggingface_hub==0.25.2"
 # onnxruntime: run.py импортирует rembg (нужен onnxruntime) ещё до проверки
-# --no_rembg, иначе ModuleNotFoundError. CPU-версии достаточно (rembg не запускаем).
+#   --no_rembg, иначе ModuleNotFoundError. CPU-версии достаточно (rembg не запускаем).
+# huggingface_hub==0.25.2: мост между свежим accelerate (нужен
+#   split_torch_state_dict_into_shards, есть с hub 0.23+) и старым diffusers 0.20.2
+#   (нужен cached_download, удалён в hub 0.26). 0.25.2 содержит оба.
 # Вернуть совместимые версии: InstantMesh мог подтянуть numpy 2.x / другой torch,
 # из-за чего ломается import torch (и SAM/InstantMesh/nvdiffrast в рантайме).
 RUN pip install --no-deps \
