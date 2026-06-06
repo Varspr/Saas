@@ -52,10 +52,11 @@ RUN wget -q "https://download.blender.org/release/Blender4.2/blender-${BLENDER_V
     && /opt/blender/blender --version
 
 # ── 2b. MakeHuman/MPFB2 — реалистичный манекен (BODY_ENGINE=mpfb). Меши CC0. ──
-# Если сборка падает на скачивании — проверьте актуальный релиз и передайте
-#   --build-arg MPFB_URL=<ссылка на mpfb-X.Y.Z.zip>
-# Список релизов: https://github.com/makehumancommunity/mpfb2/releases
-ARG INSTALL_MPFB=true
+# ВЫКЛЮЧЕНО по умолчанию: для старта используется BODY_ENGINE=parametric.
+# Чтобы включить реалистичный манекен позже — соберите образ с актуальной ссылкой:
+#   --build-arg INSTALL_MPFB=true --build-arg MPFB_URL=<ссылка на mpfb-X.Y.Z.zip>
+# Список релизов: https://github.com/makehumancommunity/mpfb2/releases (см. MANNEQUIN.md)
+ARG INSTALL_MPFB=false
 ARG MPFB_URL=https://github.com/makehumancommunity/mpfb2/releases/download/v2.0.6/mpfb-2.0.6.zip
 RUN if [ "$INSTALL_MPFB" = "true" ]; then \
       apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/* && \

@@ -40,13 +40,19 @@ BODY_ENGINE=mpfb
 BODY_GENDER=male        # male | female | neutral
 DRAPE_BACKEND=blender   # MPFB требует Blender
 ```
-Нужен Blender **с установленным MPFB2**. В наших образах он ставится:
-- `Dockerfile.worker.gpu` — MPFB включён по умолчанию (`INSTALL_MPFB=true`);
-- `Dockerfile.worker` (CPU) — вместе с `--build-arg INSTALL_BLENDER=true`.
+Нужен Blender **с установленным MPFB2**. По умолчанию MPFB в образах
+**ВЫКЛЮЧЕН** (`INSTALL_MPFB=false`), чтобы сборка не падала — для старта тело
+`parametric`. Включить позже:
+```
+docker build -f backend/Dockerfile.worker.gpu \
+  --build-arg INSTALL_MPFB=true \
+  --build-arg MPFB_URL=<ссылка на mpfb-*.zip> ...
+```
 
-> Если сборка падает на скачивании MPFB — релиз обновился. Возьмите актуальную
-> ссылку на `mpfb-X.Y.Z.zip` со страницы релизов и передайте
-> `--build-arg MPFB_URL=...`:
+> ⚠️ Важно: у MPFB2 **нет zip в релизах GitHub** — аддон скачивается с сайта
+> сообщества MakeHuman: https://static.makehumancommunity.org/mpfb/ (раздел
+> Download/Releases). Возьмите оттуда прямую ссылку на `mpfb-X.Y.Z.zip` и
+> передайте её в `MPFB_URL`. Список версий:
 > https://github.com/makehumancommunity/mpfb2/releases
 
 ## Проверка на реальном Blender
