@@ -117,13 +117,15 @@ RUN pip install --no-deps \
     && pip install "numpy<2"
 
 # Настоящий nvdiffrast: нужен для геометрии InstantMesh (FlexiCubes/NeuralRender
-# создаёт dr.RasterizeCudaContext), не только для texmap. setup.py импортирует
-# torch → ставим с --no-build-isolation (torch+numpy<2 уже готовы). CUDA-плагин
-# компилируется лениво при первом запуске на GPU (toolkit есть в devel-образе,
-# ninja нужен для JIT). Проверяем, что класс на месте (без GPU).
+# создаёт dr.RasterizeCudaContext), не только для texmap. Его setup.py КОМПИЛИРУЕТ
+# CUDA-расширение при сборке (ext_modules=[CUDAExtension]). На CI-раннере нет GPU,
+# поэтому torch не может определить compute capability → IndexError. Решение —
+# задать TORCH_CUDA_ARCH_LIST вручную: nvcc (из devel-образа) скомпилирует под эти
+# архитектуры без опроса железа. Покрываем A100(8.0)/3090,A40(8.6)/4090,L40(8.9)/H100(9.0).
+# Импорт на CI не проверяем — там нет драйвера (libcuda); проверится на Pod.
 RUN pip install ninja \
-    && pip install --no-build-isolation "git+https://github.com/NVlabs/nvdiffrast.git" \
-    && python -c "import nvdiffrast.torch as dr; assert hasattr(dr,'RasterizeCudaContext'); print('nvdiffrast OK')"
+    && TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0" CUDA_HOME=/usr/local/cuda \
+       pip install --no-build-isolation "git+https://github.com/NVlabs/nvdiffrast.git"
 
 # ── 8. Код приложения и скрипты ──
 WORKDIR /opt/app
