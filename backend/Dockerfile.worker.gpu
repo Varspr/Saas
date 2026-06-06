@@ -94,11 +94,14 @@ RUN pip install \
       opencv-python-headless==4.10.0.84
 
 # ── 7. InstantMesh (Фаза 2) ──
-# Клонируем репозиторий и ставим его зависимости. nvdiffrast компилирует
-# CUDA-ядра лениво при первом запуске (toolkit есть в devel-образе).
 # Веса (TencentARC/InstantMesh, sudo-ai/zero123plus) тянутся из HF в HF_HOME
 # при первом инференсе.
+# ВАЖНО: их requirements.txt содержит nvdiffrast — вырезаем его (sed), т.к. он
+# нужен только для --export_texmap (мы не используем) и капризен в сборке.
+# Меш получится с цветами вершин. Вернуть texmap позже: не вырезать nvdiffrast и
+# поставить его отдельно с --no-build-isolation (см. reconstruction.py).
 RUN git clone --depth 1 https://github.com/TencentARC/InstantMesh.git /opt/InstantMesh \
+    && sed -i '/nvdiffrast/d' /opt/InstantMesh/requirements.txt \
     && pip install -r /opt/InstantMesh/requirements.txt
 # Вернуть совместимые версии: InstantMesh мог подтянуть numpy 2.x / другой torch,
 # из-за чего ломается import torch (и SAM/InstantMesh/nvdiffrast в рантайме).
