@@ -75,12 +75,11 @@ RUN pip install \
 RUN pip install xformers==0.0.22.post7 \
       --index-url https://download.pytorch.org/whl/cu121
 
-# ── 4b. nvdiffrast (нужен InstantMesh --export_texmap) ──
-# numpy<2: torch 2.1 несовместим с numpy 2.x — иначе import torch падает, и сборка
-# nvdiffrast валится на «getting requirements to build wheel».
-# --no-build-isolation: setup nvdiffrast импортирует уже установленный torch.
-RUN pip install "numpy<2" ninja \
-    && pip install --no-build-isolation "git+https://github.com/NVlabs/nvdiffrast.git"
+# ── 4b. numpy<2 (torch 2.1 несовместим с numpy 2.x → иначе import torch падает) ──
+# nvdiffrast НЕ ставим: он нужен только для InstantMesh --export_texmap (UV-текстура).
+# Без него InstantMesh отдаёт меш с цветами вершин — для MVP достаточно, а сборка
+# не зависит от капризной nvdiffrast. Вернуть texmap можно позже (см. reconstruction.py).
+RUN pip install "numpy<2"
 
 # ── 5. Зависимости приложения (FastAPI/Celery/trimesh/...) ──
 # requirements-gpu.txt — standalone и пинит numpy<2 / Pillow 10.x ради

@@ -79,14 +79,17 @@ def _reconstruct_mock(clean_png: Path, mesh_obj: Path, texture_png: Path,
 
 def _reconstruct_instantmesh(clean_png: Path, mesh_obj: Path,
                              texture_png: Path) -> tuple[Path, Path]:
-    """Вызывает InstantMesh CLI и забирает .obj + текстуру из его outputs/.
+    """Вызывает InstantMesh CLI и забирает .obj (+ текстуру) из его outputs/.
 
     Команда (сверить с версией репозитория, см. MODELS.md):
-        python run.py <config.yaml> <clean_png> \
-            --output_path <out_dir> --export_texmap --no_rembg
+        python run.py <config.yaml> <clean_png> --output_path <out_dir> --no_rembg
 
-    --no_rembg: фон уже убран SAM на Фазе 1, повторный rembg только испортит
-    альфу. InstantMesh пишет результат в <out_dir>/<config_stem>/meshes/<name>.obj.
+    --no_rembg: фон уже убран SAM на Фазе 1, повторный rembg только испортит альфу.
+    БЕЗ --export_texmap: меш экспортируется с цветами вершин (не UV-текстура).
+    Это убирает зависимость от nvdiffrast (капризна в сборке). Чтобы вернуть
+    UV-текстуру позже: добавить сюда "--export_texmap" и поставить nvdiffrast в
+    Dockerfile.worker.gpu (см. шаг 4b). Результат:
+    <out_dir>/<config_stem>/meshes/<name>.obj.
     """
     repo = Path(settings.instantmesh_repo)
     out_dir = mesh_obj.parent / "instantmesh_out"
@@ -97,7 +100,6 @@ def _reconstruct_instantmesh(clean_png: Path, mesh_obj: Path,
         settings.instantmesh_config,
         str(clean_png),
         "--output_path", str(out_dir),
-        "--export_texmap",
         "--no_rembg",
     ]
     subprocess.run(cmd, cwd=str(repo), check=True)
