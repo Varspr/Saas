@@ -94,7 +94,9 @@ RUN pip install \
 # при первом инференсе.
 RUN git clone --depth 1 https://github.com/TencentARC/InstantMesh.git /opt/InstantMesh \
     && pip install -r /opt/InstantMesh/requirements.txt \
-    && pip install "git+https://github.com/NVlabs/nvdiffrast.git"
+    && pip install --no-build-isolation "git+https://github.com/NVlabs/nvdiffrast.git"
+# --no-build-isolation: nvdiffrast при сборке импортирует уже установленный torch;
+# в изолированной среде сборки его нет → нужен этот флаг.
 # Повторно фиксируем torch на случай, если зависимости InstantMesh его сдвинули.
 RUN pip install --no-deps \
       torch==2.1.0 torchvision==0.16.0 \
