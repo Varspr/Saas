@@ -96,10 +96,9 @@ RUN pip install \
 # ── 7. InstantMesh (Фаза 2) ──
 # Веса (TencentARC/InstantMesh, sudo-ai/zero123plus) тянутся из HF в HF_HOME
 # при первом инференсе.
-# ВАЖНО: их requirements.txt содержит nvdiffrast — вырезаем его (sed), т.к. он
-# нужен только для --export_texmap (мы не используем) и капризен в сборке.
-# Меш получится с цветами вершин. Вернуть texmap позже: не вырезать nvdiffrast и
-# поставить его отдельно с --no-build-isolation (см. reconstruction.py).
+# Из их requirements.txt вырезаем nvdiffrast (sed): он требует --no-build-isolation
+# (его setup.py импортирует torch) и валится при обычной установке. Ставим его
+# отдельно ниже, когда окружение готово. onnxruntime/hub — фиксы импортов run.py.
 RUN git clone --depth 1 https://github.com/TencentARC/InstantMesh.git /opt/InstantMesh \
     && sed -i '/nvdiffrast/d' /opt/InstantMesh/requirements.txt \
     && pip install -r /opt/InstantMesh/requirements.txt \
@@ -109,22 +108,22 @@ RUN git clone --depth 1 https://github.com/TencentARC/InstantMesh.git /opt/Insta
 # huggingface_hub==0.25.2: мост между свежим accelerate (нужен
 #   split_torch_state_dict_into_shards, есть с hub 0.23+) и старым diffusers 0.20.2
 #   (нужен cached_download, удалён в hub 0.26). 0.25.2 содержит оба.
-# Заглушка nvdiffrast: InstantMesh импортирует `nvdiffrast.torch as dr` в коде
-# (src/utils/mesh_util.py), но использует его только в ветке --export_texmap,
-# которую мы не вызываем. Подкладываем пустой модуль, чтобы import проходил без
-# капризной сборки реального nvdiffrast. Вернём настоящий, когда добавим texmap.
-RUN PKG="$(python -c 'import site;print(site.getsitepackages()[0])')" \
-    && mkdir -p "$PKG/nvdiffrast/torch" \
-    && : > "$PKG/nvdiffrast/__init__.py" \
-    && printf '# stub: nvdiffrast disabled (no --export_texmap)\n' > "$PKG/nvdiffrast/torch/__init__.py" \
-    && python -c "import nvdiffrast.torch as dr; print('nvdiffrast stub OK')"
 
-# Вернуть совместимые версии: InstantMesh мог подтянуть numpy 2.x / другой torch,
-# из-за чего ломается import torch (и SAM/InstantMesh в рантайме).
+# Вернуть совместимые версии ПЕРЕД сборкой nvdiffrast: InstantMesh мог подтянуть
+# numpy 2.x / другой torch, из-за чего ломается import torch.
 RUN pip install --no-deps \
       torch==2.1.0 torchvision==0.16.0 \
       --index-url https://download.pytorch.org/whl/cu121 \
     && pip install "numpy<2"
+
+# Настоящий nvdiffrast: нужен для геометрии InstantMesh (FlexiCubes/NeuralRender
+# создаёт dr.RasterizeCudaContext), не только для texmap. setup.py импортирует
+# torch → ставим с --no-build-isolation (torch+numpy<2 уже готовы). CUDA-плагин
+# компилируется лениво при первом запуске на GPU (toolkit есть в devel-образе,
+# ninja нужен для JIT). Проверяем, что класс на месте (без GPU).
+RUN pip install ninja \
+    && pip install --no-build-isolation "git+https://github.com/NVlabs/nvdiffrast.git" \
+    && python -c "import nvdiffrast.torch as dr; assert hasattr(dr,'RasterizeCudaContext'); print('nvdiffrast OK')"
 
 # ── 8. Код приложения и скрипты ──
 WORKDIR /opt/app
